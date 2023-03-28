@@ -420,7 +420,20 @@ defmodule Absinthe.Type.InterfaceTest do
   end
 
   @graphql """
-  query books {
+  query Query1 {
+    collections @skip(if: true) {
+      name
+      ... on PrivateCollection {
+        items {
+          ... on PrivateItem {
+            title content
+          }
+        }
+      }
+    }
+  }
+
+  query Query2 {
     collections {
       name
       ... on PrivateCollection {
@@ -432,13 +445,25 @@ defmodule Absinthe.Type.InterfaceTest do
       }
     }
   }
+
+  fragment Foo on PrivateCollection {
+    items {
+      title
+    }
+  }
   """
   test "Nested interface resolution passes correct data to resolve_type" do
     stringified_data = stringify_keys(PrivacyUsingNestedSchema.data())
 
     assert_data(
       %{"collections" => stringified_data},
-      run(@graphql, PrivacyUsingNestedSchema, context: %{auth: true})
+      run(@graphql, PrivacyUsingNestedSchema,
+        context: %{auth: true},
+        pipeline_modifier: fn pipeline, keyword ->
+          pipeline
+          |> Absinthe.Pipeline.without(Absinthe.Phase.Document.Validation.NoUnusedFragments)
+        end
+      )
     )
   end
 end
