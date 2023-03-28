@@ -72,6 +72,130 @@ defmodule Absinthe.PipelineTest do
     end
   end
 
+  describe ".run handles custom validation and skip directive" do
+    defmodule CustomSchema do
+      use Absinthe.Schema
+
+      @child %{id: "foo", name: "Foo"}
+
+      @items %{
+        "foo" => %{id: "foo", name: "Foo", child: @child},
+        "bar" => %{id: "bar", name: "Bar", child: @child}
+      }
+
+      query do
+        field :item, :item do
+          arg :id, :id
+
+          resolve fn %{id: item_id}, _ ->
+            {:ok, @items[item_id]}
+          end
+        end
+      end
+
+      object :item do
+        field :id, :id
+        field :name, :string
+        field :child, :child_item
+      end
+
+      object :child_item do
+        field :id, :id
+        field :name, :string
+      end
+    end
+
+    defmodule CustomValidationResult do
+      alias Absinthe.Blueprint
+
+      use Absinthe.Phase
+
+      def run(blueprint, opts) do
+        # opts = NimbleOptions.validate!(opts, @options_schema)
+        skipped_phases = Keyword.fetch!(opts, :phases)
+
+        blueprint =
+          blueprint
+          |> Blueprint.prewalk([], &handle_node/2)
+          |> filter_errors(skipped_phases)
+
+        blueprint.execution.validation_errors
+
+        case blueprint.execution.validation_errors do
+          [] ->
+            {:ok, blueprint}
+
+          _ ->
+            {:jump, blueprint, Absinthe.Phase.Document.Result}
+        end
+      end
+
+      defp handle_node(%{errors: errs} = node, errors) do
+        {node, :lists.reverse(errs) ++ errors}
+      end
+
+      defp handle_node(%{raw: raw} = node, errors) do
+        {_, errors} = Blueprint.prewalk(raw, errors, &handle_node/2)
+        {node, errors}
+      end
+
+      defp handle_node(node, acc), do: {node, acc}
+
+      defp filter_errors({blueprint, errors}, skipped_phases) do
+        {skipped_errors, filtered_errors} =
+          Enum.split_with(
+            errors,
+            &(&1.phase in skipped_phases)
+          )
+
+        blueprint.execution.validation_errors
+        |> put_in(:lists.reverse(filtered_errors))
+        |> add_skipped_validations_to_operations(skipped_errors)
+      end
+
+      defp add_skipped_validations_to_operations(blueprint, skipped_errors) do
+        Absinthe.Blueprint.update_current(
+          blueprint,
+          &put_in(&1, [Access.key(:skipped_validation_errors)], skipped_errors)
+        )
+      end
+    end
+
+    @query """
+    {
+      item(id: "foo") @skip(if: true) {
+        id
+        name
+      }
+
+      item(id: "bar") {
+        id
+        name
+        child {
+          id
+          name
+        }
+      }
+    }
+
+    fragment Unused on Item {
+      id
+    }
+    """
+
+    test "runs successfully" do
+      pipeline =
+        CustomSchema
+        |> Pipeline.for_document()
+        |> Pipeline.replace(
+          Absinthe.Phase.Document.Validation.Result,
+          {CustomValidationResult, phases: [Absinthe.Phase.Document.Validation.NoUnusedFragments]}
+        )
+
+      {:ok, _blueprint, _} = Pipeline.run(@query, pipeline)
+    end
+  end
+
   describe "default pipeline accepts possible inputs" do
     @query """
     { foo { bar } }
