@@ -85,38 +85,45 @@ defmodule Absinthe.Phase.Document.Execution.Resolution do
   given node, it will call the requisite function to expand and build those results
   """
   def walk_result(%{fields: nil} = result, bp_node, _schema_type, res, path) do
+    IO.inspect("FIELDS NIL")
     {fields, res} = resolve_fields(bp_node, res, result.root_value, path)
     {%{result | fields: fields}, res}
   end
 
   def walk_result(%{fields: fields} = result, bp_node, schema_type, res, path) do
+    IO.inspect("FIELDS")
     {fields, res} = walk_results(fields, bp_node, schema_type, res, [0 | path], [])
-
     {%{result | fields: fields}, res}
   end
 
   def walk_result(%Result.Leaf{} = result, _, _, res, _) do
+    IO.inspect("LEAF")
     {result, res}
   end
 
   def walk_result(%{values: values} = result, bp_node, schema_type, res, path) do
+    IO.inspect("VALUES")
     {values, res} = walk_results(values, bp_node, schema_type, res, [0 | path], [])
     {%{result | values: values}, res}
   end
 
   def walk_result(%Absinthe.Resolution{} = old_res, _bp_node, _schema_type, res, _path) do
+    IO.inspect("RESOLUTION")
     res = update_persisted_fields(old_res, res)
     do_resolve_field(res, res.source, res.path)
   end
 
   # walk list results
   defp walk_results([value | values], bp_node, inner_type, res, [i | sub_path] = path, acc) do
+    IO.inspect("VALUES LIST")
     {result, res} = walk_result(value, bp_node, inner_type, %{res | path: path}, path)
     walk_results(values, bp_node, inner_type, res, [i + 1 | sub_path], [result | acc])
   end
 
-  defp walk_results([], _, _, res = %{path: [_ | sub_path]}, _, acc),
-    do: {:lists.reverse(acc), %{res | path: sub_path}}
+  defp walk_results([], _, _, res = %{path: [_ | sub_path]}, _, acc) do
+    IO.inspect("EMPTY RESULT")
+    {:lists.reverse(acc), %{res | path: sub_path}}
+  end
 
   defp resolve_fields(parent, res, source, path) do
     # parent is the parent field, we need to get the return type of that field
